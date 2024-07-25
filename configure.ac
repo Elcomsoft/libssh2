@@ -34,7 +34,7 @@ AC_SUBST(LIBSSH2_VERSION)
 # get this removed.
 AC_CANONICAL_HOST
 case "$host" in
-    *-mingw*)
+    *-mingw*|*msys*)
     LIBS="$LIBS -lws2_32"
     ;;
     *darwin*)
