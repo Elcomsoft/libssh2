@@ -40,7 +40,6 @@
  */
 
 #include "libssh2_priv.h"
-#include "misc.h"
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -49,7 +48,7 @@
 #include <errno.h>
 #include <assert.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 /* Force parameter type. */
 #define recv(s, b, l, f)  recv((s), (b), (int)(l), (f))
 #define send(s, b, l, f)  send((s), (b), (int)(l), (f))
@@ -126,8 +125,8 @@ int _libssh2_error(LIBSSH2_SESSION* session, int errcode, const char *errmsg)
     return _libssh2_error_flags(session, errcode, errmsg, 0);
 }
 
-#ifdef WIN32
-static int wsa2errno(void)
+#ifdef _WIN32
+int _libssh2_wsa2errno(void)
 {
     switch(WSAGetLastError()) {
     case WSAEWOULDBLOCK:
@@ -161,23 +160,29 @@ _libssh2_recv(libssh2_socket_t sock, void *buffer, size_t length,
     (void)abstract;
 
     rc = recv(sock, buffer, length, flags);
-#ifdef WIN32
-    if(rc < 0)
-        return -wsa2errno();
-#else
     if(rc < 0) {
+        int err;
+#ifdef _WIN32
+        err = _libssh2_wsa2errno();
+#else
+        err = errno;
+#endif
+        /* Profiling tools that use SIGPROF can cause EINTR responses.
+           recv() does not modify its arguments when it returns EINTR,
+           but there may be data waiting, so the caller should try again */
+        if(err == EINTR)
+            return -EAGAIN;
         /* Sometimes the first recv() function call sets errno to ENOENT on
            Solaris and HP-UX */
-        if(errno == ENOENT)
+        if(err == ENOENT)
             return -EAGAIN;
 #ifdef EWOULDBLOCK /* For VMS and other special unixes */
-        else if(errno == EWOULDBLOCK)
-          return -EAGAIN;
+        else if(err == EWOULDBLOCK)
+            return -EAGAIN;
 #endif
         else
-            return -errno;
+            return -err;
     }
-#endif
     return rc;
 }
 
@@ -194,18 +199,24 @@ _libssh2_send(libssh2_socket_t sock, const void *buffer, size_t length,
     (void)abstract;
 
     rc = send(sock, buffer, length, flags);
-#ifdef WIN32
-    if(rc < 0)
-        return -wsa2errno();
-#else
     if(rc < 0) {
+        int err;
+#ifdef _WIN32
+        err = _libssh2_wsa2errno();
+#else
+        err = errno;
+#endif
+        /* Profiling tools that use SIGPROF can cause EINTR responses.
+           send() is defined as not yet sending any data when it returns EINTR,
+           so the caller should try again */
+        if(err == EINTR)
+            return -EAGAIN;
 #ifdef EWOULDBLOCK /* For VMS and other special unixes */
-        if(errno == EWOULDBLOCK)
+        if(err == EWOULDBLOCK)
             return -EAGAIN;
 #endif
-        return -errno;
+        return -err;
     }
-#endif
     return rc;
 }
 
@@ -285,7 +296,7 @@ int _libssh2_store_bignum2_bytes(unsigned char **buf,
 
     extraByte = (len > 0 && (p[0] & 0x80) != 0);
     len_stored = (uint32_t)len;
-    if(extraByte && len_stored == 0xffffffff)
+    if(extraByte && len_stored == UINT32_MAX)
         len_stored--;
     _libssh2_store_u32(buf, len_stored + extraByte);
 
@@ -709,7 +720,7 @@ int _libssh2_gettimeofday(struct timeval *tp, void *tzp)
 {
     (void)tzp;
     if(tp) {
-#ifdef WIN32
+#ifdef _WIN32
         /* Offset between 1601-01-01 and 1970-01-01 in 100 nanosec units */
         #define _WIN32_FT_OFFSET (116444736000000000)
 
@@ -901,7 +912,6 @@ int _libssh2_copy_string(LIBSSH2_SESSION *session, struct string_buf *buf,
         }
     }
     else {
-        *outlen = 0;
         *outbuf = NULL;
     }
 

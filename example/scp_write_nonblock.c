@@ -20,6 +20,9 @@
 #ifdef HAVE_ARPA_INET_H
 #include <arpa/inet.h>
 #endif
+#ifdef HAVE_SYS_TIME_H
+#include <sys/time.h>
+#endif
 
 #include <stdio.h>
 #include <time.h>  /* for time() */
@@ -45,7 +48,14 @@ static int waitsocket(libssh2_socket_t socket_fd, LIBSSH2_SESSION *session)
 
     FD_ZERO(&fd);
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
     FD_SET(socket_fd, &fd);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
     /* now make sure we wait in the correct direction */
     dir = libssh2_session_block_directions(session);
@@ -81,7 +91,7 @@ int main(int argc, char *argv[])
     int duration;
     size_t prev;
 
-#ifdef WIN32
+#ifdef _WIN32
     WSADATA wsadata;
 
     rc = WSAStartup(MAKEWORD(2, 0), &wsadata);
@@ -219,7 +229,7 @@ int main(int argc, char *argv[])
         }
         ptr = mem;
 
-        total += nread;
+        total += (libssh2_struct_stat_size)nread;
 
         prev = 0;
         do {
@@ -230,16 +240,17 @@ int main(int argc, char *argv[])
                 prev = 0;
             }
             if(nwritten < 0) {
-                fprintf(stderr, "ERROR %d total %ld / %d prev %d\n",
-                        (int)nwritten, (long)total, (int)nread, (int)prev);
+                fprintf(stderr, "ERROR %ld total %ld / %lu prev %lu\n",
+                        (long)nwritten, (long)total,
+                        (unsigned long)nread, (unsigned long)prev);
                 break;
             }
             else {
                 prev = nread;
 
                 /* nwritten indicates how many bytes were written this time */
-                nread -= nwritten;
                 ptr += nwritten;
+                nread -= (size_t)nwritten;
             }
         } while(nread);
     } while(!nread); /* only continue if nread was drained */
@@ -271,16 +282,16 @@ shutdown:
 
     if(sock != LIBSSH2_INVALID_SOCKET) {
         shutdown(sock, 2);
-#ifdef WIN32
-        closesocket(sock);
-#else
-        close(sock);
-#endif
+        LIBSSH2_SOCKET_CLOSE(sock);
     }
 
     fprintf(stderr, "all done\n");
 
     libssh2_exit();
+
+#ifdef _WIN32
+    WSACleanup();
+#endif
 
     return 0;
 }

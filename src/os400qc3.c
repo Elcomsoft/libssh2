@@ -1,5 +1,4 @@
 /*
- * Copyright (C) Patrick Monnerat, D+H <patrick.monnerat@dh.com>
  * Copyright (C) Patrick Monnerat <patrick@monnerat.net>
  * All rights reserved.
  *
@@ -219,12 +218,14 @@ static const pkcs5algo  rc2CBC = {
     '\0',   0,  0,  0,  8,  0,  32
 };
 
+static int  parse_pbes1(LIBSSH2_SESSION *session, pkcs5params *pkcs5,
+                        pkcs5algo *algo, asn1Element *param);
+
+#if LIBSSH2_MD5
 /* pbeWithMD5AndDES-CBC OID: 1.2.840.113549.1.5.3 */
 static const unsigned char  OID_pbeWithMD5AndDES_CBC[] = {
     9, 40 + 2, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x05, 0x03
 };
-static int  parse_pbes1(LIBSSH2_SESSION *session, pkcs5params *pkcs5,
-                        pkcs5algo *algo, asn1Element *param);
 static const pkcs5algo  pbeWithMD5AndDES_CBC = {
     OID_pbeWithMD5AndDES_CBC,   parse_pbes1,    Qc3_DES,    8,  Qc3_CBC,
     Qc3_Pad_Counter,    '\0',   8,  Qc3_MD5,    MD5_DIGEST_LENGTH,  8,  0,  0
@@ -238,6 +239,7 @@ static const pkcs5algo  pbeWithMD5AndRC2_CBC = {
     OID_pbeWithMD5AndRC2_CBC,   parse_pbes1,    Qc3_RC2,    8,  Qc3_CBC,
     Qc3_Pad_Counter,    '\0',   0,  Qc3_MD5,    MD5_DIGEST_LENGTH,  8,  0,  64
 };
+#endif
 
 /* pbeWithSHA1AndDES-CBC OID: 1.2.840.113549.1.5.10 */
 static const unsigned char  OID_pbeWithSHA1AndDES_CBC[] = {
@@ -262,8 +264,10 @@ static const pkcs5algo  pbeWithSHA1AndRC2_CBC = {
 /* pbeWithMD2AndRC2-CBC OID: 1.2.840.113549.1.5.4: MD2 not implemented. */
 
 static const pkcs5algo *    pbestable[] = {
+#if LIBSSH2_MD5
     &pbeWithMD5AndDES_CBC,
     &pbeWithMD5AndRC2_CBC,
+#endif
     &pbeWithSHA1AndDES_CBC,
     &pbeWithSHA1AndRC2_CBC,
     &PBES2,
@@ -454,9 +458,9 @@ _libssh2_bn_bits(_libssh2_bn *bn)
 }
 
 int
-_libssh2_bn_from_bin(_libssh2_bn *bn, int len, const unsigned char *val)
+_libssh2_bn_from_bin(_libssh2_bn *bn, size_t len, const unsigned char *val)
 {
-    int i;
+    size_t i;
 
     if(!bn || (len && !val))
         return -1;
@@ -635,11 +639,11 @@ static asn1Element *
 asn1_new_from_bytes(const unsigned char *data, unsigned int length)
 {
     asn1Element *e;
-    asn1Element te;
+    asn1Element et;
 
-    getASN1Element(&te,
+    getASN1Element(&et,
                    (unsigned char *) data, (unsigned char *) data + length);
-    e = asn1_new(te.tag, te.end - te.beg);
+    e = asn1_new(et.tag, et.end - et.beg);
 
     if(e)
         memcpy(e->header, data, e->end - e->header);
@@ -949,7 +953,7 @@ _libssh2_os400qc3_crypto_dtor(_libssh2_os400qc3_crypto_ctx *x)
  *******************************************************************/
 
 int
-libssh2_os400qc3_hash_init(Qc3_Format_ALGD0100_T *x, unsigned int algorithm)
+_libssh2_os400qc3_hash_init(Qc3_Format_ALGD0100_T *x, unsigned int algorithm)
 {
     Qc3_Format_ALGD0500_T algd;
     Qus_EC_t errcode;
@@ -966,88 +970,147 @@ libssh2_os400qc3_hash_init(Qc3_Format_ALGD0100_T *x, unsigned int algorithm)
     return errcode.Bytes_Available? 0: 1;
 }
 
-void
-libssh2_os400qc3_hash_update(Qc3_Format_ALGD0100_T *ctx,
-                             const unsigned char *data, int len)
+int
+_libssh2_os400qc3_hash_update(Qc3_Format_ALGD0100_T *ctx,
+                              const unsigned char *data, int len)
 {
     char dummy[64];
+    Qus_EC_t errcode;
 
     ctx->Final_Op_Flag = Qc3_Continue;
+    set_EC_length(errcode, sizeof(errcode));
     Qc3CalculateHash((char *) data, &len, Qc3_Data, (char *) ctx,
-                     Qc3_Alg_Token, anycsp, NULL, dummy, (char *) &ecnull);
-}
-
-void
-libssh2_os400qc3_hash_final(Qc3_Format_ALGD0100_T *ctx, unsigned char *out)
-{
-    char data;
-
-    ctx->Final_Op_Flag = Qc3_Final;
-    Qc3CalculateHash(&data, &zero, Qc3_Data, (char *) ctx, Qc3_Alg_Token,
-                     anycsp, NULL, (char *) out, (char *) &ecnull);
-    Qc3DestroyAlgorithmContext(ctx->Alg_Context_Token, (char *) &ecnull);
-    memset(ctx->Alg_Context_Token, 0, sizeof(ctx->Alg_Context_Token));
+                     Qc3_Alg_Token, anycsp, NULL, dummy, &errcode);
+    return errcode.Bytes_Available? 0: 1;
 }
 
 int
-libssh2_os400qc3_hash(const unsigned char *message, unsigned long len,
-                      unsigned char *out, unsigned int algo)
+_libssh2_os400qc3_hash_final(Qc3_Format_ALGD0100_T *ctx, unsigned char *out)
+{
+    char data;
+    Qus_EC_t errcode;
+
+    ctx->Final_Op_Flag = Qc3_Final;
+    set_EC_length(errcode, sizeof(errcode));
+    Qc3CalculateHash(&data, &zero, Qc3_Data, (char *) ctx, Qc3_Alg_Token,
+                     anycsp, NULL, (char *) out, &errcode);
+    Qc3DestroyAlgorithmContext(ctx->Alg_Context_Token, (char *) &ecnull);
+    memset(ctx->Alg_Context_Token, 0, sizeof(ctx->Alg_Context_Token));
+    return errcode.Bytes_Available? 0: 1;
+}
+
+int
+_libssh2_os400qc3_hash(const unsigned char *message, unsigned long len,
+                       unsigned char *out, unsigned int algo)
 {
     Qc3_Format_ALGD0100_T ctx;
 
-    if(!libssh2_os400qc3_hash_init(&ctx, algo))
+    if(!_libssh2_os400qc3_hash_init(&ctx, algo) ||
+       !_libssh2_os400qc3_hash_update(&ctx, message, len) ||
+       !_libssh2_os400qc3_hash_final(&ctx, out))
         return 1;
 
-    libssh2_os400qc3_hash_update(&ctx, message, len);
-    libssh2_os400qc3_hash_final(&ctx, out);
     return 0;
 }
 
-void
+static int
 libssh2_os400qc3_hmac_init(_libssh2_os400qc3_crypto_ctx *ctx,
                            int algo, size_t minkeylen, void *key, int keylen)
 {
+    Qus_EC_t errcode;
+
     if(keylen < minkeylen) {
         char *lkey = alloca(minkeylen);
 
         /* Pad key with zeroes if too short. */
         if(!lkey)
-            return;
+            return 0;
         memcpy(lkey, (char *) key, keylen);
         memset(lkey + keylen, 0, minkeylen - keylen);
         key = (void *) lkey;
         keylen = minkeylen;
     }
-    libssh2_os400qc3_hash_init(&ctx->hash, algo);
+    if(!_libssh2_os400qc3_hash_init(&ctx->hash, algo))
+        return 0;
+    set_EC_length(errcode, sizeof(errcode));
     Qc3CreateKeyContext((char *) key, &keylen, binstring, &algo, qc3clear,
                         NULL, NULL, ctx->key.Key_Context_Token,
-                        (char *) &ecnull);
+                        (char *) &errcode);
+    return errcode.Bytes_Available? 0: 1;
 }
 
-void
-libssh2_os400qc3_hmac_update(_libssh2_os400qc3_crypto_ctx *ctx,
-                             unsigned char *data, int len)
+int _libssh2_hmac_ctx_init(libssh2_hmac_ctx *ctx)
+{
+    memset((char *) ctx, 0, sizeof(libssh2_hmac_ctx));
+    return 1;
+}
+
+#if LIBSSH2_MD5
+int _libssh2_hmac_md5_init(libssh2_hmac_ctx *ctx,
+                           void *key, size_t keylen)
+{
+    return libssh2_os400qc3_hmac_init(ctx, Qc3_MD5,                     \
+                                      MD5_DIGEST_LENGTH,                \
+                                      key, keylen);
+}
+#endif
+
+int _libssh2_hmac_sha1_init(libssh2_hmac_ctx *ctx,
+                            void *key, size_t keylen)
+{
+    return libssh2_os400qc3_hmac_init(ctx, Qc3_SHA1,                    \
+                                      SHA_DIGEST_LENGTH,                \
+                                      key, keylen);
+}
+
+int _libssh2_hmac_sha256_init(libssh2_hmac_ctx *ctx,
+                              void *key, size_t keylen)
+{
+    return libssh2_os400qc3_hmac_init(ctx, Qc3_SHA256,                  \
+                                      SHA256_DIGEST_LENGTH,             \
+                                      key, keylen);
+}
+
+int _libssh2_hmac_sha512_init(libssh2_hmac_ctx *ctx,
+                              void *key, size_t keylen)
+{
+    return libssh2_os400qc3_hmac_init(ctx, Qc3_SHA512,                  \
+                                      SHA512_DIGEST_LENGTH,             \
+                                      key, keylen);
+}
+
+int _libssh2_hmac_update(libssh2_hmac_ctx *ctx,
+                         const void *data, size_t datalen)
 {
     char dummy[64];
+    int len = (int) datalen;
+    Qus_EC_t errcode;
 
     ctx->hash.Final_Op_Flag = Qc3_Continue;
+    set_EC_length(errcode, sizeof(errcode));
     Qc3CalculateHMAC((char *) data, &len, Qc3_Data, (char *) &ctx->hash,
                      Qc3_Alg_Token, ctx->key.Key_Context_Token, Qc3_Key_Token,
-                     anycsp, NULL, dummy, (char *) &ecnull);
+                     anycsp, NULL, dummy, (char *) &errcode);
+    return errcode.Bytes_Available? 0: 1;
 }
 
-void
-libssh2_os400qc3_hmac_final(_libssh2_os400qc3_crypto_ctx *ctx,
-                            unsigned char *out)
+int _libssh2_hmac_final(libssh2_hmac_ctx *ctx, void *out)
 {
     char data;
+    Qus_EC_t errcode;
 
     ctx->hash.Final_Op_Flag = Qc3_Final;
+    set_EC_length(errcode, sizeof(errcode));
     Qc3CalculateHMAC((char *) data, &zero, Qc3_Data, (char *) &ctx->hash,
                      Qc3_Alg_Token, ctx->key.Key_Context_Token, Qc3_Key_Token,
-                     anycsp, NULL, (char *) out, (char *) &ecnull);
+                     anycsp, NULL, (char *) out, (char *) &errcode);
+    return errcode.Bytes_Available? 0: 1;
 }
 
+void _libssh2_hmac_cleanup(libssh2_hmac_ctx *ctx)
+{
+    _libssh2_os400qc3_crypto_dtor(ctx);
+}
 
 /*******************************************************************
  *
@@ -1368,6 +1431,7 @@ pbkdf1(LIBSSH2_SESSION *session, char **dk, const unsigned char *passphrase,
     Qc3_Format_ALGD0100_T hctx;
     int len = pkcs5->saltlen;
     char *data = (char *) pkcs5->salt;
+    Qus_EC_t errcode;
 
     *dk = NULL;
     if(pkcs5->dklen > pkcs5->hashlen)
@@ -1378,18 +1442,34 @@ pbkdf1(LIBSSH2_SESSION *session, char **dk, const unsigned char *passphrase,
     if(!*dk)
         return -1;
 
-    /* Initial hash. */
-    libssh2_os400qc3_hash_init(&hctx, pkcs5->hash);
-    libssh2_os400qc3_hash_update(&hctx, passphrase, strlen(passphrase));
-    hctx.Final_Op_Flag = Qc3_Final;
-    Qc3CalculateHash((char *) pkcs5->salt, &len, Qc3_Data, (char *) &hctx,
-                     Qc3_Alg_Token, anycsp, NULL, *dk, (char *) &ecnull);
+    set_EC_length(errcode, sizeof(errcode));
+    errcode.Bytes_Available = 1;   /* Defaults to error flagging. */
 
-    /* Iterate. */
-    len = pkcs5->hashlen;
-    for(i = 1; i < pkcs5->itercount; i++)
-        Qc3CalculateHash((char *) *dk, &len, Qc3_Data, (char *) &hctx,
-                         Qc3_Alg_Token, anycsp, NULL, *dk, (char *) &ecnull);
+    /* Initial hash. */
+    if(_libssh2_os400qc3_hash_init(&hctx, pkcs5->hash)) {
+        if(_libssh2_os400qc3_hash_update(&hctx,
+                                         passphrase, strlen(passphrase))) {
+            hctx.Final_Op_Flag = Qc3_Final;
+            Qc3CalculateHash((char *) pkcs5->salt, &len, Qc3_Data,
+                             (char *) &hctx, Qc3_Alg_Token, anycsp, NULL, *dk,
+                             (char *) &errcode);
+
+            /* Iterate. */
+            len = pkcs5->hashlen;
+            for(i = 1; !errcode.Bytes_Available && i < pkcs5->itercount; i++)
+                Qc3CalculateHash((char *) *dk, &len, Qc3_Data, (char *) &hctx,
+                                 Qc3_Alg_Token, anycsp, NULL, *dk,
+                                 (char *) &errcode);
+        }
+
+        Qc3DestroyAlgorithmContext(hctx.Alg_Context_Token, (char *) &ecnull);
+    }
+
+    if(errcode.Bytes_Available) {
+        LIBSSH2_FREE(session, *dk);
+        *dk = NULL;
+        return -1;
+    }
 
     /* Special stuff for PBES1: split derived key into 8-byte key and 8-byte
        initialization vector. */
@@ -1397,8 +1477,6 @@ pbkdf1(LIBSSH2_SESSION *session, char **dk, const unsigned char *passphrase,
     pkcs5->ivlen = 8;
     pkcs5->iv = *dk + 8;
 
-    /* Clean-up and exit. */
-    Qc3DestroyAlgorithmContext(hctx.Alg_Context_Token, (char *) &ecnull);
     return 0;
 }
 
@@ -1425,6 +1503,11 @@ pbkdf2(LIBSSH2_SESSION *session, char **dk, const unsigned char *passphrase,
     if(!mac)
         return -1;
 
+    /* Create an HMAC context for our computations. */
+    if(!libssh2_os400qc3_hmac_init(&hctx, pkcs5->hash, pkcs5->hashlen,
+                                   (void *) passphrase, strlen(passphrase)))
+        return -1;
+
     /* Allocate the derived key buffer. */
     l = t;
     buf = LIBSSH2_ALLOC(session, l * pkcs5->hashlen);
@@ -1432,20 +1515,26 @@ pbkdf2(LIBSSH2_SESSION *session, char **dk, const unsigned char *passphrase,
         return -1;
     *dk = buf;
 
-    /* Create an HMAC context for our computations. */
-    libssh2_os400qc3_hmac_init(&hctx, pkcs5->hash, pkcs5->hashlen,
-                               (void *) passphrase, strlen(passphrase));
-
     /* Process each hLen-size blocks. */
     for(i = 1; i <= l; i++) {
         ni = htonl(i);
-        libssh2_os400qc3_hmac_update(&hctx, pkcs5->salt, pkcs5->saltlen);
-        libssh2_os400qc3_hmac_update(&hctx, (char *) &ni, sizeof(ni));
-        libssh2_os400qc3_hmac_final(&hctx, mac);
+        if(!_libssh2_hmac_update(&hctx, pkcs5->salt, pkcs5->saltlen) ||
+           !_libssh2_hmac_update(&hctx, &ni, sizeof(ni)) ||
+           !_libssh2_hmac_final(&hctx, mac)) {
+            LIBSSH2_FREE(session, buf);
+            *dk = NULL;
+            _libssh2_os400qc3_crypto_dtor(&hctx);
+            return -1;
+        }
         memcpy(buf, mac, pkcs5->hashlen);
         for(j = 1; j < pkcs5->itercount; j++) {
-            libssh2_os400qc3_hmac_update(&hctx, mac, pkcs5->hashlen);
-            libssh2_os400qc3_hmac_final(&hctx, mac);
+            if(!_libssh2_hmac_update(&hctx, mac, pkcs5->hashlen) ||
+               !_libssh2_hmac_final(&hctx, mac)) {
+                LIBSSH2_FREE(session, buf);
+                *dk = NULL;
+                _libssh2_os400qc3_crypto_dtor(&hctx);
+                return -1;
+            }
             for(k = 0; k < pkcs5->hashlen; k++)
                 buf[k] ^= mac[k];
         }
@@ -2431,7 +2520,11 @@ _libssh2_supported_key_sign_algorithms(LIBSSH2_SESSION *session,
 
     if(key_method_len == 7 &&
        memcmp(key_method, "ssh-rsa", key_method_len) == 0) {
-        return "rsa-sha2-512,rsa-sha2-256,ssh-rsa";
+        return "rsa-sha2-512,rsa-sha2-256"
+#if LIBSSH2_RSA_SHA1
+            ",ssh-rsa"
+#endif
+            ;
     }
 
     return NULL;

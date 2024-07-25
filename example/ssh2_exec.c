@@ -51,7 +51,14 @@ static int waitsocket(libssh2_socket_t socket_fd, LIBSSH2_SESSION *session)
 
     FD_ZERO(&fd);
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
     FD_SET(socket_fd, &fd);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
     /* now make sure we wait in the correct direction */
     dir = libssh2_session_block_directions(session);
@@ -83,7 +90,7 @@ int main(int argc, char *argv[])
     LIBSSH2_KNOWNHOSTS *nh;
     int type;
 
-#ifdef WIN32
+#ifdef _WIN32
     WSADATA wsadata;
 
     rc = WSAStartup(MAKEWORD(2, 0), &wsadata);
@@ -252,15 +259,15 @@ int main(int argc, char *argv[])
             else {
                 if(nread != LIBSSH2_ERROR_EAGAIN)
                     /* no need to output this for the EAGAIN case */
-                    fprintf(stderr, "libssh2_channel_read returned %d\n",
-                            (int)nread);
+                    fprintf(stderr, "libssh2_channel_read returned %ld\n",
+                            (long)nread);
             }
         }
         while(nread > 0);
 
         /* this is due to blocking that would occur otherwise so we loop on
            this condition */
-        if(rc == LIBSSH2_ERROR_EAGAIN) {
+        if(nread == LIBSSH2_ERROR_EAGAIN) {
             waitsocket(sock, session);
         }
         else
@@ -279,8 +286,8 @@ int main(int argc, char *argv[])
     if(exitsignal)
         fprintf(stderr, "\nGot signal: %s\n", exitsignal);
     else
-        fprintf(stderr, "\nEXIT: %d bytecount: %d\n",
-                exitcode, (int)bytecount);
+        fprintf(stderr, "\nEXIT: %d bytecount: %ld\n",
+                exitcode, (long)bytecount);
 
     libssh2_channel_free(channel);
     channel = NULL;
@@ -294,16 +301,16 @@ shutdown:
 
     if(sock != LIBSSH2_INVALID_SOCKET) {
         shutdown(sock, 2);
-#ifdef WIN32
-        closesocket(sock);
-#else
-        close(sock);
-#endif
+        LIBSSH2_SOCKET_CLOSE(sock);
     }
 
     fprintf(stderr, "all done\n");
 
     libssh2_exit();
+
+#ifdef _WIN32
+    WSACleanup();
+#endif
 
     return 0;
 }
