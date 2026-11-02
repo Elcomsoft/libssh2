@@ -812,10 +812,9 @@ static LIBSSH2_CHANNEL *scp_recv(LIBSSH2_SESSION *session,
 
 scp_recv_empty_channel:
     /* the code only jumps here as a result of a zero read from channel_read()
-     _libssh2_error(session, LIBSSH2_ERROR_SCP_PROTOCOL, "Unexpected channel close");
        so we check EOF status to avoid getting stuck in a loop */
-    _libssh2_error(session, LIBSSH2_ERROR_SCP_PROTOCOL, "Unexpected channel close");
 //    if(libssh2_channel_eof(session->scpRecv_channel))
+    ssh2_err(session, LIBSSH2_ERROR_SCP_PROTOCOL, "Unexpected channel close");
 //    else
 //        return session->scpRecv_channel;
     /* fall-through */
