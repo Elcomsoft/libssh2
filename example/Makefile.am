@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: BSD-3-Clause
 AUTOMAKE_OPTIONS = foreign nostdinc
 
-EXTRA_DIST = CMakeLists.txt
+EXTRA_DIST = .checksrc CMakeLists.txt
 
-# Get noing_PROGRAMS
+# Get noinst_PROGRAMS variable
 include Makefile.inc
 
 AM_CPPFLAGS = -I$(top_builddir)/src -I$(top_srcdir)/src -I$(top_srcdir)/include

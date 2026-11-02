@@ -8,18 +8,18 @@
 #include "runner.h"
 #include "openssh_fixture.h"
 
-#include <stdlib.h>  /* for getenv() */
+#include <stdlib.h>  /* for atoi(), getenv() */
 
 /* set in Dockerfile */
 static const char *username = "libssh2";
-static const char *key_file_private = "key_rsa";
-static const char *key_file_public = "key_rsa.pub";
+static const char *key_file_private = "keys/id_rsa_pem";
+static const char *key_file_public = "keys/id_rsa_pem.pub";
 
 int test(LIBSSH2_SESSION *session)
 {
     int rc;
     unsigned long xfer_bytes = 0;
-    LIBSSH2_CHANNEL *channel;
+    LIBSSH2_CHANNEL *channel = NULL;
 
     /* Size and number of blocks to transfer
      * This needs to be large to increase the chance of timing effects causing
@@ -35,13 +35,18 @@ int test(LIBSSH2_SESSION *session)
     const char *env;
     const char *userauth_list;
 
-    /* Ignore our hard-wired Dockerfile user when not running under Docker */
-    if(!openssh_fixture_have_docker()) {
+    /* Ignore our hard-wired Dockerfile user when not using a container */
+    if(!openssh_fixture_have_container()) {
         username = getenv("USER");
 #ifdef _WIN32
         if(!username)
             username = getenv("USERNAME");
 #endif
+    }
+
+    if(!username) {
+        fprintf(stderr, "username not set\n");
+        return 1;
     }
 
     userauth_list = libssh2_userauth_list(session, username,
@@ -76,7 +81,7 @@ int test(LIBSSH2_SESSION *session)
 
     env = getenv("FIXTURE_XFER_COUNT");
     if(env) {
-        xfer_count = (unsigned long)strtol(env, NULL, 0);
+        xfer_count = (unsigned long)atoi(env);
         fprintf(stderr, "Custom xfer_count: %lu\n", xfer_count);
     }
 
@@ -99,10 +104,10 @@ int test(LIBSSH2_SESSION *session)
             fprintf(stderr, "Unable to read response: %ld\n", (long)err);
         else {
             unsigned int i;
-            for(i = 0; i < (unsigned long)err; ++i) {
+            for(i = 0; i < (unsigned int)err; ++i) {
                 if(buf[i]) {
                     fprintf(stderr, "Bad data received\n");
-                    /* Test will fail below due to bad data length */
+                    /* Test fails below due to bad data length */
                     break;
                 }
             }
@@ -110,16 +115,14 @@ int test(LIBSSH2_SESSION *session)
         }
     }
 
-    /* Shut down */
-    if(libssh2_channel_close(channel))
-        fprintf(stderr, "Unable to close channel\n");
+shutdown:
 
     if(channel) {
-        libssh2_channel_free(channel);
-        channel = NULL;
-    }
+        if(libssh2_channel_close(channel))
+            fprintf(stderr, "Unable to close channel\n");
 
-shutdown:
+        libssh2_channel_free(channel);
+    }
 
     /* Test check */
     if(xfer_bytes != xfer_count * xfer_bs) {

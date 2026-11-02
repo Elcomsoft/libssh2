@@ -1,5 +1,10 @@
-libssh2 bindings
-================
+<!--
+Copyright (C) The libssh2 project and its contributors.
+
+SPDX-License-Identifier: BSD-3-Clause
+-->
+
+# libssh2 bindings
 
 Creative people have written bindings or interfaces for various environments
 and programming languages. Using one of these bindings allows you to take
@@ -19,7 +24,5 @@ but must be downloaded and installed separately.
 [PHP ssh2](https://pecl.php.net/package/ssh2)
 
 [Python pylibssh2](https://pypi.python.org/pypi/pylibssh2)
-
-[Python-ctypes PySsh2](https://github.com/gellule/PySsh2)
 
 [Ruby libssh2-ruby](https://github.com/mitchellh/libssh2-ruby)

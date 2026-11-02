@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright (C) The libssh2 project and its contributors.
+# SPDX-License-Identifier: BSD-3-Clause
 
 set -eu
 
@@ -8,24 +10,30 @@ set -eu
 # Save off the current folder as the build root.
 export BUILD_ROOT="$PWD"
 
-echo "CC: $CC"
-echo "CXX: $CXX"
-echo "LIB_FUZZING_ENGINE: $LIB_FUZZING_ENGINE"
-echo "CFLAGS: $CFLAGS"
-echo "CXXFLAGS: $CXXFLAGS"
-echo "OUT: $OUT"
+export CPPFLAGS
+CPPFLAGS+=' -DLIBSSH2_HMAC_SHA1_ENABLE'  # Workaround for hang then timeout
 
-MAKEFLAGS+="-j$(nproc)"
+echo "CC: ${CC:-}"
+echo "CXX: ${CXX:-}"
+echo "LIB_FUZZING_ENGINE: ${LIB_FUZZING_ENGINE:-}"
+echo "CFLAGS: ${CFLAGS:-}"
+echo "CXXFLAGS: ${CXXFLAGS:-}"
+echo "CPPFLAGS: ${CPPFLAGS:-}"
+echo "OUT: ${OUT:-}"
+
+MAKEFLAGS+=" -j$(nproc)"
 export MAKEFLAGS
 
 # Install dependencies
 apt-get -y install automake libtool libssl-dev zlib1g-dev
 
 # Compile the fuzzer.
-./buildconf
-./configure --disable-shared \
+autoreconf -fi
+./configure --disable-dependency-tracking \
+            --disable-shared \
             --enable-ossfuzzers \
             --disable-examples-build \
+            --disable-docs \
             --enable-debug
 make V=1
 

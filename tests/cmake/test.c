@@ -6,8 +6,15 @@
 #include "libssh2.h"
 #include <stdio.h>
 
-int main(void)
+int main(int argc, const char *argv[])
 {
-    printf("libssh2_version(0): |%s|\n", libssh2_version(0));
+    (void)argc;
+
+    puts("libssh2 test:");
+    puts(argv[0]);
+    puts(libssh2_version(0));
+    puts(libssh2_build_options());
+    puts("---");
+
     return 0;
 }
